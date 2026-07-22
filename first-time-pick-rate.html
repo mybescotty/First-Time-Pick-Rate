@@ -143,6 +143,17 @@
       count as not picked first time.
     </div>
     <div id="statusMsg" class="status-msg hidden"></div>
+    <details id="diagnosticsSection" class="hidden" style="margin-top:14px">
+      <summary style="cursor:pointer;font-size:12px;color:var(--text-secondary)">Diagnostics — detected columns &amp; sample values</summary>
+      <div class="help-text">
+        <div><b>Detected columns:</b></div>
+        <div id="diagColumns"></div>
+        <div style="margin-top:8px"><b>Values found in PODocType (top 15):</b></div>
+        <div id="diagPoDocType"></div>
+        <div style="margin-top:8px"><b>Values found in TransactionType (top 15):</b></div>
+        <div id="diagTransactionType"></div>
+      </div>
+    </details>
   </div>
 
   <div id="resultsSection" class="hidden">
@@ -210,6 +221,21 @@ function rateClass(rate) {
   if (rate >= 90) return 'row-green';
   if (rate >= 75) return 'row-amber';
   return 'row-red';
+}
+
+function topValueCounts(rows, headerKey, limit) {
+  if (!headerKey) return [];
+  const counts = new Map();
+  for (const row of rows) {
+    const raw = row[headerKey];
+    const val = String(raw == null ? '' : raw).trim();
+    const label = val === '' ? '(blank)' : val;
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(function (e) { return { value: e[0], count: e[1] }; })
+    .sort(function (a, b) { return b.count - a.count; })
+    .slice(0, limit);
 }
 
 function processRows(rows, headerMap) {
@@ -291,6 +317,30 @@ function showStatus(msg, kind) {
   statusMsg.classList.remove('hidden');
 }
 
+function renderValueCounts(el, counts) {
+  if (!counts.length) {
+    el.textContent = '(column not found in file)';
+    return;
+  }
+  el.innerHTML = counts.map(function (c) {
+    return escapeHtml(c.value) + ' <span style="color:var(--text-secondary)">(' + c.count.toLocaleString() + ')</span>';
+  }).join('<br>');
+}
+
+function renderDiagnostics(headerMap, rows) {
+  const diagSection = document.getElementById('diagnosticsSection');
+  const diagColumns = document.getElementById('diagColumns');
+  diagColumns.innerHTML = REQUIRED_COLUMNS.map(function (canon) {
+    const matched = headerMap[canon];
+    return canon + ' &rarr; ' + (matched ? '"' + escapeHtml(matched) + '"' : '<span style="color:#c0392b">not found</span>');
+  }).join('<br>');
+
+  renderValueCounts(document.getElementById('diagPoDocType'), topValueCounts(rows, headerMap.PODocType, 15));
+  renderValueCounts(document.getElementById('diagTransactionType'), topValueCounts(rows, headerMap.TransactionType, 15));
+
+  diagSection.classList.remove('hidden');
+}
+
 function renderResults(result) {
   document.getElementById('tileTotal').textContent = result.total.toLocaleString();
   document.getElementById('tileNotFirst').textContent = result.notFirst.toLocaleString();
@@ -322,6 +372,7 @@ fileInput.addEventListener('change', function (e) {
   fileNameEl.textContent = file.name;
   statusMsg.classList.add('hidden');
   resultsSection.classList.add('hidden');
+  document.getElementById('diagnosticsSection').classList.add('hidden');
   downloadBtn.disabled = true;
   currentResult = null;
 
@@ -338,6 +389,7 @@ fileInput.addEventListener('change', function (e) {
         return;
       }
       const headerMap = buildHeaderMap(rows[0]);
+      renderDiagnostics(headerMap, rows);
       const result = processRows(rows, headerMap);
       if (result.error) {
         showStatus(result.error, 'error');
