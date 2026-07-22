@@ -104,6 +104,20 @@
   .ftpr-table tbody tr.row-red td { background: var(--row-red); }
   .ftpr-table tbody tr.row-amber td { background: var(--row-amber); }
   .ftpr-table tbody tr.row-green td { background: var(--row-green); }
+  .depot-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--text-secondary);
+    padding: 0 6px 0 0;
+  }
+  .depot-detail td { padding: 0 10px 14px; border-bottom: 1px solid #eaecef; background: var(--bg-page); }
+  .detail-table { width: 100%; border-collapse: collapse; font-size: 12px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .detail-table th { background: #eceaf5; color: var(--text-primary); padding: 6px 8px; text-align: left; font-size: 11px; }
+  .detail-table td { padding: 5px 8px; border-bottom: 1px solid #eaecef; }
+  .detail-table td.num, .detail-table th.num { text-align: right; }
+  .detail-table tbody tr:last-child td { border-bottom: none; }
   .download-row { margin-top: 20px; }
   .action-btn {
     background: #27ae60;
@@ -183,6 +197,7 @@
     <div class="panel">
       <h2>By Depot (Store)</h2>
       <div class="meta-line" id="metaLine"></div>
+      <div class="help-text" style="margin-top:0;margin-bottom:10px">Click the &#9656; next to a depot to see the lines that were ordered in (not picked first time).</div>
       <table class="ftpr-table">
         <thead>
           <tr>
@@ -202,7 +217,7 @@
 </main>
 <script>
 const REQUIRED_COLUMNS = ['TransactionType', 'WorkOrder', 'FleetNumber', 'Part', 'PODocType', 'PO', 'Store', 'TransactionQty'];
-const OPTIONAL_META_COLUMNS = ['FiscalYear', 'Period', 'PostingDate'];
+const OPTIONAL_META_COLUMNS = ['FiscalYear', 'Period', 'PostingDate', 'PartDesc'];
 
 function buildHeaderMap(sampleRow) {
   const map = {};
@@ -229,6 +244,55 @@ function rateClass(rate) {
   if (rate >= 90) return 'row-green';
   if (rate >= 75) return 'row-amber';
   return 'row-red';
+}
+
+function buildDetailTableHtml(rows) {
+  if (!rows || !rows.length) {
+    return '<div class="help-text">No not-first-time lines for this depot.</div>';
+  }
+  const body = rows.map(function (r) {
+    return '<tr>' +
+      '<td>' + escapeHtml(r.part) + '</td>' +
+      '<td>' + escapeHtml(r.partDesc) + '</td>' +
+      '<td>' + escapeHtml(r.workOrder) + '</td>' +
+      '<td>' + escapeHtml(r.po) + '</td>' +
+      '<td>' + escapeHtml(r.poDocType) + '</td>' +
+      '<td>' + escapeHtml(r.fleetNumber) + '</td>' +
+      '<td class="num">' + r.qty.toLocaleString() + '</td>' +
+      '</tr>';
+  }).join('');
+  return '<table class="detail-table"><thead><tr>' +
+    '<th>Part</th><th>Description</th><th>Work Order</th><th>PO</th><th>PODocType</th><th>Fleet</th><th class="num">Qty</th>' +
+    '</tr></thead><tbody>' + body + '</tbody></table>';
+}
+
+function buildDepotRowsHtml(depotRows) {
+  return depotRows.map(function (d, idx) {
+    const mainRow = '<tr class="' + rateClass(d.rate) + ' depot-row">' +
+      '<td><button type="button" class="depot-toggle" data-idx="' + idx + '" aria-expanded="false">&#9656;</button>' + escapeHtml(d.store) + '</td>' +
+      '<td class="num">' + d.total.toLocaleString() + '</td>' +
+      '<td class="num">' + d.notFirst.toLocaleString() + '</td>' +
+      '<td class="num">' + d.rate.toFixed(1) + '%</td>' +
+      '</tr>';
+    const detailRow = '<tr class="depot-detail hidden" id="depot-detail-' + idx + '">' +
+      '<td colspan="4">' + buildDetailTableHtml(d.notFirstRows) + '</td>' +
+      '</tr>';
+    return mainRow + detailRow;
+  }).join('');
+}
+
+function attachDepotToggleHandler(containerEl) {
+  containerEl.addEventListener('click', function (e) {
+    const btn = e.target.closest('.depot-toggle');
+    if (!btn) return;
+    const idx = btn.getAttribute('data-idx');
+    const detailRow = document.getElementById('depot-detail-' + idx);
+    if (!detailRow) return;
+    const isHidden = detailRow.classList.contains('hidden');
+    detailRow.classList.toggle('hidden');
+    btn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+    btn.innerHTML = isHidden ? '&#9662;' : '&#9656;';
+  });
 }
 
 function topValueCounts(rows, headerKey, limit) {
@@ -285,12 +349,21 @@ function processRows(rows, headerMap) {
 
     if (!isNotFirst && !isFirst) continue;
 
-    if (!depotStats.has(store)) depotStats.set(store, { first: 0, notFirst: 0 });
+    if (!depotStats.has(store)) depotStats.set(store, { first: 0, notFirst: 0, notFirstRows: [] });
     const stats = depotStats.get(store);
 
     if (isNotFirst) {
       notFirstQty += qty;
       stats.notFirst += qty;
+      stats.notFirstRows.push({
+        part: part,
+        partDesc: headerMap.PartDesc ? String(row[headerMap.PartDesc] == null ? '' : row[headerMap.PartDesc]).trim() : '',
+        workOrder: workOrder,
+        po: po,
+        poDocType: poDocType,
+        fleetNumber: String(fleetNumber == null ? '' : fleetNumber).trim(),
+        qty: qty
+      });
     } else {
       firstQty += qty;
       stats.first += qty;
@@ -311,7 +384,8 @@ function processRows(rows, headerMap) {
     const s = entry[1];
     const depotTotal = s.first + s.notFirst;
     const rate = depotTotal ? (s.first / depotTotal) * 100 : 0;
-    return { store: store, total: depotTotal, notFirst: s.notFirst, rate: rate };
+    const notFirstRows = s.notFirstRows.slice().sort(function (a, b) { return b.qty - a.qty; });
+    return { store: store, total: depotTotal, notFirst: s.notFirst, rate: rate, notFirstRows: notFirstRows };
   }).sort(function (a, b) { return a.rate - b.rate; });
 
   const total = firstQty + notFirstQty;
@@ -335,6 +409,7 @@ const fileNameEl = document.getElementById('fileName');
 const statusMsg = document.getElementById('statusMsg');
 const resultsSection = document.getElementById('resultsSection');
 const downloadBtn = document.getElementById('downloadBtn');
+attachDepotToggleHandler(document.getElementById('depotTableBody'));
 
 function showStatus(msg, kind) {
   statusMsg.textContent = msg;
@@ -389,16 +464,7 @@ function renderResults(result) {
   document.getElementById('metaLine').textContent = metaBits.join(' · ');
 
   const tbody = document.getElementById('depotTableBody');
-  tbody.innerHTML = '';
-  for (const d of result.depotRows) {
-    const tr = document.createElement('tr');
-    tr.className = rateClass(d.rate);
-    tr.innerHTML = '<td>' + escapeHtml(d.store) + '</td>' +
-      '<td class="num">' + d.total + '</td>' +
-      '<td class="num">' + d.notFirst + '</td>' +
-      '<td class="num">' + d.rate.toFixed(1) + '%</td>';
-    tbody.appendChild(tr);
-  }
+  tbody.innerHTML = buildDepotRowsHtml(result.depotRows);
   resultsSection.classList.remove('hidden');
 }
 
@@ -480,19 +546,21 @@ const REPORT_CSS = `
   .ftpr-table tbody tr.row-red td { background: var(--row-red); }
   .ftpr-table tbody tr.row-amber td { background: var(--row-amber); }
   .ftpr-table tbody tr.row-green td { background: var(--row-green); }
+  .depot-toggle { background: none; border: none; cursor: pointer; font-size: 11px; color: var(--text-secondary); padding: 0 6px 0 0; }
+  .depot-detail td { padding: 0 10px 14px; border-bottom: 1px solid #eaecef; background: var(--bg-page); }
+  .detail-table { width: 100%; border-collapse: collapse; font-size: 12px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .detail-table th { background: #eceaf5; color: var(--text-primary); padding: 6px 8px; text-align: left; font-size: 11px; }
+  .detail-table td { padding: 5px 8px; border-bottom: 1px solid #eaecef; }
+  .detail-table td.num, .detail-table th.num { text-align: right; }
+  .detail-table tbody tr:last-child td { border-bottom: none; }
+  .help-text { font-size: 12px; color: var(--text-secondary); }
+  .hidden { display: none; }
 `;
 
 function buildReportHtml(data) {
   const jsonStr = JSON.stringify(data).replace(/</g, '\\u003c');
 
-  const rowsHtml = data.depotRows.map(function (d) {
-    return '<tr class="' + rateClass(d.rate) + '">' +
-      '<td>' + escapeHtml(d.store) + '</td>' +
-      '<td class="num">' + d.total + '</td>' +
-      '<td class="num">' + d.notFirst + '</td>' +
-      '<td class="num">' + d.rate.toFixed(1) + '%</td>' +
-      '</tr>';
-  }).join('');
+  const rowsHtml = buildDepotRowsHtml(data.depotRows);
 
   const metaBits = [];
   if (data.years.length) metaBits.push('Fiscal Year: ' + data.years.join(', '));
@@ -521,11 +589,22 @@ function buildReportHtml(data) {
     '<div class="panel">',
     '<h2>By Depot (Store)</h2>',
     '<div class="meta-line">' + metaLine + '</div>',
+    '<div class="help-text" style="margin-bottom:10px">Click the &#9656; next to a depot to see the lines that were ordered in (not picked first time).</div>',
     '<table class="ftpr-table"><thead><tr><th>Store</th><th class="num">Total Issued</th><th class="num">Not First Time</th><th class="num">FTPR %</th></tr></thead>',
     '<tbody>' + rowsHtml + '</tbody></table>',
     '</div>',
     '</main>',
     '<' + 'script>window.REPORT_DATA = ' + jsonStr + ';</' + 'script>',
+    '<' + 'script>' +
+      'document.querySelector(".ftpr-table tbody").addEventListener("click", function (e) {' +
+      'var btn = e.target.closest(".depot-toggle"); if (!btn) return;' +
+      'var row = document.getElementById("depot-detail-" + btn.getAttribute("data-idx")); if (!row) return;' +
+      'var hidden = row.classList.contains("hidden");' +
+      'row.classList.toggle("hidden");' +
+      'btn.setAttribute("aria-expanded", hidden ? "true" : "false");' +
+      'btn.innerHTML = hidden ? "&#9662;" : "&#9656;";' +
+      '});' +
+    '</' + 'script>',
     '</body>',
     '</html>'
   ].join('\n');
