@@ -136,12 +136,13 @@
       <span class="file-name" id="fileName">No file selected</span>
     </div>
     <div class="help-text">
-      Upload the raw transaction export for one period. The tool treats every row where
-      <b>TransactionType = I</b>, <b>WorkOrder</b> is populated, and <b>FleetNumber</b>
-      is a numeric ID of 5+ digits as an issue to a work order (parts starting <b>90</b>
-      are ignored). Of those, rows are picked directly off the shelf (first time) only
-      when both <b>PODocType</b> and <b>PO</b> are blank — if either is populated, it
-      counts as not picked first time.
+      Upload the raw transaction export for one period. Rows with a <b>WorkOrder</b>
+      and a <b>Part</b> not starting <b>90</b> are counted by <b>TransactionQty</b>
+      (items, not transaction lines) into one of two buckets: <b>picked first time</b>
+      when <b>TransactionType = I</b>, <b>PO</b> is blank, and <b>FleetNumber</b> is a
+      numeric ID of 5+ digits; <b>not picked first time</b> when <b>PO</b> is populated
+      and <b>PODocType</b> is <b>ZVOR</b> or <b>ZIN</b>. Rows matching neither bucket
+      are excluded from the totals.
     </div>
     <div id="statusMsg" class="status-msg hidden"></div>
     <details id="diagnosticsSection" class="hidden" style="margin-top:14px">
@@ -155,6 +156,10 @@
         <div id="diagPo"></div>
         <div style="margin-top:8px"><b>Values found in TransactionType (top 15):</b></div>
         <div id="diagTransactionType"></div>
+        <div style="margin-top:8px"><b>TransactionType breakdown for rows where PODocType is ZVOR/ZIN:</b></div>
+        <div id="diagTxTypeForZvorZin"></div>
+        <div style="margin-top:8px"><b>TransactionType breakdown for rows with a non-blank PO:</b></div>
+        <div id="diagTxTypeForPo"></div>
       </div>
     </details>
   </div>
@@ -196,7 +201,7 @@
   </div>
 </main>
 <script>
-const REQUIRED_COLUMNS = ['TransactionType', 'WorkOrder', 'FleetNumber', 'Part', 'PODocType', 'PO', 'Store'];
+const REQUIRED_COLUMNS = ['TransactionType', 'WorkOrder', 'FleetNumber', 'Part', 'PODocType', 'PO', 'Store', 'TransactionQty'];
 const OPTIONAL_META_COLUMNS = ['FiscalYear', 'Period', 'PostingDate'];
 
 function buildHeaderMap(sampleRow) {
@@ -241,6 +246,12 @@ function topValueCounts(rows, headerKey, limit) {
     .slice(0, limit);
 }
 
+function transactionTypeBreakdown(rows, headerMap, filterFn) {
+  if (!headerMap.TransactionType) return [];
+  const matching = rows.filter(filterFn);
+  return topValueCounts(matching, headerMap.TransactionType, 10);
+}
+
 function processRows(rows, headerMap) {
   const missing = REQUIRED_COLUMNS.filter(function (c) { return !headerMap[c]; });
   if (missing.length) {
@@ -248,8 +259,8 @@ function processRows(rows, headerMap) {
   }
 
   const depotStats = new Map();
-  let total = 0;
-  let notFirst = 0;
+  let firstQty = 0;
+  let notFirstQty = 0;
   const years = new Set();
   const periods = new Set();
 
@@ -259,22 +270,30 @@ function processRows(rows, headerMap) {
     const fleetNumber = row[headerMap.FleetNumber];
     const part = String(row[headerMap.Part] == null ? '' : row[headerMap.Part]).trim();
     const store = String(row[headerMap.Store] == null ? '' : row[headerMap.Store]).trim() || '(blank)';
-    const poDocType = String(row[headerMap.PODocType] == null ? '' : row[headerMap.PODocType]).trim();
+    const poDocType = String(row[headerMap.PODocType] == null ? '' : row[headerMap.PODocType]).trim().toUpperCase();
     const po = String(row[headerMap.PO] == null ? '' : row[headerMap.PO]).trim();
+    const qtyRaw = Number(row[headerMap.TransactionQty]);
+    const qty = isNaN(qtyRaw) ? 0 : qtyRaw;
 
-    if (txType !== 'I') continue;
     if (!workOrder) continue;
-    if (!isNumericFleetNumber(fleetNumber)) continue;
     if (part.toUpperCase().startsWith('90')) continue;
 
-    total++;
-    if (!depotStats.has(store)) depotStats.set(store, { total: 0, notFirst: 0 });
-    const stats = depotStats.get(store);
-    stats.total++;
+    // Not picked first time: ordered in specifically via a VOR/ZIN purchase order.
+    const isNotFirst = po !== '' && (poDocType === 'ZVOR' || poDocType === 'ZIN');
+    // Picked first time: issued straight from the shelf against a real fleet number, no PO.
+    const isFirst = !isNotFirst && txType === 'I' && po === '' && isNumericFleetNumber(fleetNumber);
 
-    if (poDocType !== '' || po !== '') {
-      notFirst++;
-      stats.notFirst++;
+    if (!isNotFirst && !isFirst) continue;
+
+    if (!depotStats.has(store)) depotStats.set(store, { first: 0, notFirst: 0 });
+    const stats = depotStats.get(store);
+
+    if (isNotFirst) {
+      notFirstQty += qty;
+      stats.notFirst += qty;
+    } else {
+      firstQty += qty;
+      stats.first += qty;
     }
 
     if (headerMap.FiscalYear) {
@@ -290,15 +309,17 @@ function processRows(rows, headerMap) {
   const depotRows = Array.from(depotStats.entries()).map(function (entry) {
     const store = entry[0];
     const s = entry[1];
-    const rate = s.total ? ((s.total - s.notFirst) / s.total) * 100 : 0;
-    return { store: store, total: s.total, notFirst: s.notFirst, rate: rate };
+    const depotTotal = s.first + s.notFirst;
+    const rate = depotTotal ? (s.first / depotTotal) * 100 : 0;
+    return { store: store, total: depotTotal, notFirst: s.notFirst, rate: rate };
   }).sort(function (a, b) { return a.rate - b.rate; });
 
-  const overallRate = total ? ((total - notFirst) / total) * 100 : 0;
+  const total = firstQty + notFirstQty;
+  const overallRate = total ? (firstQty / total) * 100 : 0;
 
   return {
     total: total,
-    notFirst: notFirst,
+    notFirst: notFirstQty,
     overallRate: overallRate,
     depotRows: depotRows,
     years: Array.from(years).sort(),
@@ -342,6 +363,17 @@ function renderDiagnostics(headerMap, rows) {
   renderValueCounts(document.getElementById('diagPoDocType'), topValueCounts(rows, headerMap.PODocType, 15));
   renderValueCounts(document.getElementById('diagPo'), topValueCounts(rows, headerMap.PO, 15));
   renderValueCounts(document.getElementById('diagTransactionType'), topValueCounts(rows, headerMap.TransactionType, 15));
+
+  const zvorZinRows = transactionTypeBreakdown(rows, headerMap, function (r) {
+    const pd = String(r[headerMap.PODocType] == null ? '' : r[headerMap.PODocType]).trim().toUpperCase();
+    return pd === 'ZVOR' || pd === 'ZIN';
+  });
+  renderValueCounts(document.getElementById('diagTxTypeForZvorZin'), zvorZinRows);
+
+  const poPresentRows = transactionTypeBreakdown(rows, headerMap, function (r) {
+    return String(r[headerMap.PO] == null ? '' : r[headerMap.PO]).trim() !== '';
+  });
+  renderValueCounts(document.getElementById('diagTxTypeForPo'), poPresentRows);
 
   diagSection.classList.remove('hidden');
 }
