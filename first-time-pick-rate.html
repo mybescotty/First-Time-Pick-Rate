@@ -139,8 +139,9 @@
       Upload the raw transaction export for one period. The tool treats every row where
       <b>TransactionType = I</b>, <b>WorkOrder</b> is populated, and <b>FleetNumber</b>
       is a numeric ID of 5+ digits as an issue to a work order (parts starting <b>90</b>
-      are ignored). Of those, rows where <b>PODocType</b> is <b>ZVOR</b> or <b>ZIN</b>
-      count as not picked first time.
+      are ignored). Of those, rows are picked directly off the shelf (first time) only
+      when both <b>PODocType</b> and <b>PO</b> are blank — if either is populated, it
+      counts as not picked first time.
     </div>
     <div id="statusMsg" class="status-msg hidden"></div>
     <details id="diagnosticsSection" class="hidden" style="margin-top:14px">
@@ -150,6 +151,8 @@
         <div id="diagColumns"></div>
         <div style="margin-top:8px"><b>Values found in PODocType (top 15):</b></div>
         <div id="diagPoDocType"></div>
+        <div style="margin-top:8px"><b>Values found in PO (top 15):</b></div>
+        <div id="diagPo"></div>
         <div style="margin-top:8px"><b>Values found in TransactionType (top 15):</b></div>
         <div id="diagTransactionType"></div>
       </div>
@@ -193,7 +196,7 @@
   </div>
 </main>
 <script>
-const REQUIRED_COLUMNS = ['TransactionType', 'WorkOrder', 'FleetNumber', 'Part', 'PODocType', 'Store'];
+const REQUIRED_COLUMNS = ['TransactionType', 'WorkOrder', 'FleetNumber', 'Part', 'PODocType', 'PO', 'Store'];
 const OPTIONAL_META_COLUMNS = ['FiscalYear', 'Period', 'PostingDate'];
 
 function buildHeaderMap(sampleRow) {
@@ -256,7 +259,8 @@ function processRows(rows, headerMap) {
     const fleetNumber = row[headerMap.FleetNumber];
     const part = String(row[headerMap.Part] == null ? '' : row[headerMap.Part]).trim();
     const store = String(row[headerMap.Store] == null ? '' : row[headerMap.Store]).trim() || '(blank)';
-    const poDocType = String(row[headerMap.PODocType] == null ? '' : row[headerMap.PODocType]).trim().toUpperCase();
+    const poDocType = String(row[headerMap.PODocType] == null ? '' : row[headerMap.PODocType]).trim();
+    const po = String(row[headerMap.PO] == null ? '' : row[headerMap.PO]).trim();
 
     if (txType !== 'I') continue;
     if (!workOrder) continue;
@@ -268,7 +272,7 @@ function processRows(rows, headerMap) {
     const stats = depotStats.get(store);
     stats.total++;
 
-    if (poDocType === 'ZVOR' || poDocType === 'ZIN') {
+    if (poDocType !== '' || po !== '') {
       notFirst++;
       stats.notFirst++;
     }
@@ -336,6 +340,7 @@ function renderDiagnostics(headerMap, rows) {
   }).join('<br>');
 
   renderValueCounts(document.getElementById('diagPoDocType'), topValueCounts(rows, headerMap.PODocType, 15));
+  renderValueCounts(document.getElementById('diagPo'), topValueCounts(rows, headerMap.PO, 15));
   renderValueCounts(document.getElementById('diagTransactionType'), topValueCounts(rows, headerMap.TransactionType, 15));
 
   diagSection.classList.remove('hidden');
