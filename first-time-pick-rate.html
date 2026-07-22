@@ -150,13 +150,13 @@
       <span class="file-name" id="fileName">No file selected</span>
     </div>
     <div class="help-text">
-      Upload the raw transaction export for one period. Rows with a <b>WorkOrder</b>
-      and a <b>Part</b> not starting <b>90</b> or <b>99</b> are counted by <b>TransactionQty</b>
-      (items, not transaction lines) into one of two buckets: <b>picked first time</b>
-      when <b>TransactionType = I</b>, <b>PO</b> is blank, and <b>FleetNumber</b> is a
-      numeric ID of 5+ digits; <b>not picked first time</b> when <b>PO</b> is populated
-      and <b>PODocType</b> is <b>ZVOR</b> or <b>ZIN</b>. Rows matching neither bucket
-      are excluded from the totals.
+      Upload the raw transaction export for one period. Rows with a <b>WorkOrder</b>,
+      a <b>Part</b> not starting <b>90</b> or <b>99</b>, and a <b>FleetNumber</b> that
+      is a numeric ID of 5+ digits are counted by <b>TransactionQty</b> (items, not
+      transaction lines) into one of two buckets: <b>picked first time</b> when
+      <b>TransactionType = I</b> and <b>PO</b> is blank; <b>not picked first time</b>
+      when <b>PO</b> is populated and <b>PODocType</b> is <b>ZVOR</b> or <b>ZIN</b>.
+      Rows matching neither bucket are excluded from the totals.
     </div>
     <div id="statusMsg" class="status-msg hidden"></div>
     <details id="diagnosticsSection" class="hidden" style="margin-top:14px">
@@ -343,10 +343,12 @@ function processRows(rows, headerMap) {
     const partPrefix = part.toUpperCase();
     if (partPrefix.startsWith('90') || partPrefix.startsWith('99')) continue;
 
+    if (!isNumericFleetNumber(fleetNumber)) continue;
+
     // Not picked first time: ordered in specifically via a VOR/ZIN purchase order.
     const isNotFirst = po !== '' && (poDocType === 'ZVOR' || poDocType === 'ZIN');
     // Picked first time: issued straight from the shelf against a real fleet number, no PO.
-    const isFirst = !isNotFirst && txType === 'I' && po === '' && isNumericFleetNumber(fleetNumber);
+    const isFirst = !isNotFirst && txType === 'I' && po === '';
 
     if (!isNotFirst && !isFirst) continue;
 
