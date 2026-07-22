@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>First Time Pick Rate</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg-page:       #f5f5f7;
+    --bg-header:     #2D2A6E;
+    --bg-panel:      #ffffff;
+    --accent:        #E5007D;
+    --accent-hover:  #C0006A;
+    --row-red:       rgba(231,76,60,0.12);
+    --row-amber:     rgba(243,156,18,0.15);
+    --row-green:     rgba(39,174,96,0.15);
+    --text-primary:  #2D2A6E;
+    --text-secondary:#6b6b8a;
+    --text-on-dark:  #ffffff;
+    --border:        #e0e0ec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg-page);
+    color: var(--text-primary);
+  }
+  header {
+    background: var(--bg-header);
+    color: var(--text-on-dark);
+    padding: 0 20px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  .tagline { font-size: 10px; opacity: 0.55; letter-spacing: 0.05em; margin-top: 2px; }
+  main {
+    max-width: 1100px;
+    margin: 24px auto;
+    padding: 0 20px 60px;
+  }
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .upload-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .upload-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    padding: 9px 16px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .upload-btn:hover { background: var(--accent-hover); }
+  .upload-btn:disabled { background: #b9b9c9; cursor: not-allowed; }
+  input[type=file] { display: none; }
+  .file-name { font-size: 13px; color: var(--text-secondary); }
+  .status-msg { font-size: 13px; margin-top: 10px; color: var(--text-secondary); }
+  .status-msg.error { color: #c0392b; }
+  .status-msg.warn { color: #e67e22; }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .tile {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  .tile .value { font-size: 30px; font-weight: 700; color: var(--text-primary); }
+  .tile.highlight .value { color: var(--accent); }
+  .tile .label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--text-primary); }
+  .meta-line { font-size: 12px; color: var(--text-secondary); margin-bottom: 16px; }
+  .ftpr-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ftpr-table th {
+    background: var(--bg-header);
+    color: var(--text-on-dark);
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 12px;
+  }
+  .ftpr-table td { padding: 7px 10px; border-bottom: 1px solid #eaecef; }
+  .ftpr-table td.num, .ftpr-table th.num { text-align: right; }
+  .ftpr-table tbody tr:hover td { filter: brightness(0.96); }
+  .ftpr-table tbody tr.row-red td { background: var(--row-red); }
+  .ftpr-table tbody tr.row-amber td { background: var(--row-amber); }
+  .ftpr-table tbody tr.row-green td { background: var(--row-green); }
+  .download-row { margin-top: 20px; }
+  .action-btn {
+    background: #27ae60;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    padding: 9px 18px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .action-btn:hover { background: #219a52; }
+  .action-btn:disabled { background: #b9b9c9; cursor: not-allowed; }
+  .hidden { display: none; }
+  .help-text { font-size: 12px; color: var(--text-secondary); margin-top: 10px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>🔧 First Time Pick Rate</h1>
+    <div class="tagline">Designed by First Bus Franchise · Engineering</div>
+  </div>
+</header>
+<main>
+  <div class="panel">
+    <h2>Upload period export</h2>
+    <div class="upload-row">
+      <label class="upload-btn" for="fileInput">Choose .xlsx file</label>
+      <input type="file" id="fileInput" accept=".xlsx,.xls">
+      <span class="file-name" id="fileName">No file selected</span>
+    </div>
+    <div class="help-text">
+      Upload the raw transaction export for one period. The tool treats every row where
+      <b>TransactionType = I</b>, <b>WorkOrder</b> is populated, and <b>FleetNumber</b>
+      is a numeric ID of 5+ digits as an issue to a work order (parts starting <b>90</b>
+      are ignored). Of those, rows where <b>PODocType</b> is <b>ZVOR</b> or <b>ZIN</b>
+      count as not picked first time.
+    </div>
+    <div id="statusMsg" class="status-msg hidden"></div>
+  </div>
+
+  <div id="resultsSection" class="hidden">
+    <div class="tiles">
+      <div class="tile">
+        <div class="value" id="tileTotal">0</div>
+        <div class="label">Total Issued</div>
+      </div>
+      <div class="tile">
+        <div class="value" id="tileNotFirst">0</div>
+        <div class="label">Not Picked First Time</div>
+      </div>
+      <div class="tile highlight">
+        <div class="value" id="tileRate">0%</div>
+        <div class="label">First Time Pick Rate</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>By Depot (Store)</h2>
+      <div class="meta-line" id="metaLine"></div>
+      <table class="ftpr-table">
+        <thead>
+          <tr>
+            <th>Store</th>
+            <th class="num">Total Issued</th>
+            <th class="num">Not First Time</th>
+            <th class="num">FTPR %</th>
+          </tr>
+        </thead>
+        <tbody id="depotTableBody"></tbody>
+      </table>
+      <div class="download-row">
+        <button class="action-btn" id="downloadBtn" disabled>Download Report</button>
+      </div>
+    </div>
+  </div>
+</main>
+<script>
+const REQUIRED_COLUMNS = ['TransactionType', 'WorkOrder', 'FleetNumber', 'Part', 'PODocType', 'Store'];
+const OPTIONAL_META_COLUMNS = ['FiscalYear', 'Period', 'PostingDate'];
+
+function buildHeaderMap(sampleRow) {
+  const map = {};
+  const keys = Object.keys(sampleRow);
+  for (const canon of REQUIRED_COLUMNS.concat(OPTIONAL_META_COLUMNS)) {
+    const found = keys.find(function (k) { return k.trim().toLowerCase() === canon.toLowerCase(); });
+    if (found) map[canon] = found;
+  }
+  return map;
+}
+
+function isNumericFleetNumber(value) {
+  const s = String(value == null ? '' : value).trim();
+  return /^\d{5,}$/.test(s);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function rateClass(rate) {
+  if (rate >= 90) return 'row-green';
+  if (rate >= 75) return 'row-amber';
+  return 'row-red';
+}
+
+function processRows(rows, headerMap) {
+  const missing = REQUIRED_COLUMNS.filter(function (c) { return !headerMap[c]; });
+  if (missing.length) {
+    return { error: 'Missing expected column(s) in the uploaded file: ' + missing.join(', ') };
+  }
+
+  const depotStats = new Map();
+  let total = 0;
+  let notFirst = 0;
+  const years = new Set();
+  const periods = new Set();
+
+  for (const row of rows) {
+    const txType = String(row[headerMap.TransactionType] == null ? '' : row[headerMap.TransactionType]).trim().toUpperCase();
+    const workOrder = String(row[headerMap.WorkOrder] == null ? '' : row[headerMap.WorkOrder]).trim();
+    const fleetNumber = row[headerMap.FleetNumber];
+    const part = String(row[headerMap.Part] == null ? '' : row[headerMap.Part]).trim();
+    const store = String(row[headerMap.Store] == null ? '' : row[headerMap.Store]).trim() || '(blank)';
+    const poDocType = String(row[headerMap.PODocType] == null ? '' : row[headerMap.PODocType]).trim().toUpperCase();
+
+    if (txType !== 'I') continue;
+    if (!workOrder) continue;
+    if (!isNumericFleetNumber(fleetNumber)) continue;
+    if (part.toUpperCase().startsWith('90')) continue;
+
+    total++;
+    if (!depotStats.has(store)) depotStats.set(store, { total: 0, notFirst: 0 });
+    const stats = depotStats.get(store);
+    stats.total++;
+
+    if (poDocType === 'ZVOR' || poDocType === 'ZIN') {
+      notFirst++;
+      stats.notFirst++;
+    }
+
+    if (headerMap.FiscalYear) {
+      const y = String(row[headerMap.FiscalYear] == null ? '' : row[headerMap.FiscalYear]).trim();
+      if (y) years.add(y);
+    }
+    if (headerMap.Period) {
+      const p = String(row[headerMap.Period] == null ? '' : row[headerMap.Period]).trim();
+      if (p) periods.add(p);
+    }
+  }
+
+  const depotRows = Array.from(depotStats.entries()).map(function (entry) {
+    const store = entry[0];
+    const s = entry[1];
+    const rate = s.total ? ((s.total - s.notFirst) / s.total) * 100 : 0;
+    return { store: store, total: s.total, notFirst: s.notFirst, rate: rate };
+  }).sort(function (a, b) { return a.rate - b.rate; });
+
+  const overallRate = total ? ((total - notFirst) / total) * 100 : 0;
+
+  return {
+    total: total,
+    notFirst: notFirst,
+    overallRate: overallRate,
+    depotRows: depotRows,
+    years: Array.from(years).sort(),
+    periods: Array.from(periods).sort()
+  };
+}
+
+let currentResult = null;
+let currentFileName = '';
+
+const fileInput = document.getElementById('fileInput');
+const fileNameEl = document.getElementById('fileName');
+const statusMsg = document.getElementById('statusMsg');
+const resultsSection = document.getElementById('resultsSection');
+const downloadBtn = document.getElementById('downloadBtn');
+
+function showStatus(msg, kind) {
+  statusMsg.textContent = msg;
+  statusMsg.className = 'status-msg' + (kind ? ' ' + kind : '');
+  statusMsg.classList.remove('hidden');
+}
+
+function renderResults(result) {
+  document.getElementById('tileTotal').textContent = result.total.toLocaleString();
+  document.getElementById('tileNotFirst').textContent = result.notFirst.toLocaleString();
+  document.getElementById('tileRate').textContent = result.overallRate.toFixed(1) + '%';
+
+  const metaBits = [];
+  if (result.years.length) metaBits.push('Fiscal Year: ' + result.years.join(', '));
+  if (result.periods.length) metaBits.push('Period: ' + result.periods.join(', '));
+  document.getElementById('metaLine').textContent = metaBits.join(' · ');
+
+  const tbody = document.getElementById('depotTableBody');
+  tbody.innerHTML = '';
+  for (const d of result.depotRows) {
+    const tr = document.createElement('tr');
+    tr.className = rateClass(d.rate);
+    tr.innerHTML = '<td>' + escapeHtml(d.store) + '</td>' +
+      '<td class="num">' + d.total + '</td>' +
+      '<td class="num">' + d.notFirst + '</td>' +
+      '<td class="num">' + d.rate.toFixed(1) + '%</td>';
+    tbody.appendChild(tr);
+  }
+  resultsSection.classList.remove('hidden');
+}
+
+fileInput.addEventListener('change', function (e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  currentFileName = file.name;
+  fileNameEl.textContent = file.name;
+  statusMsg.classList.add('hidden');
+  resultsSection.classList.add('hidden');
+  downloadBtn.disabled = true;
+  currentResult = null;
+
+  const reader = new FileReader();
+  reader.onload = function (evt) {
+    try {
+      const data = new Uint8Array(evt.target.result);
+      const wb = XLSX.read(data, { type: 'array', cellDates: true });
+      const sheetName = wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (!rows.length) {
+        showStatus('The sheet appears to be empty.', 'error');
+        return;
+      }
+      const headerMap = buildHeaderMap(rows[0]);
+      const result = processRows(rows, headerMap);
+      if (result.error) {
+        showStatus(result.error, 'error');
+        return;
+      }
+      currentResult = result;
+      renderResults(result);
+      downloadBtn.disabled = false;
+    } catch (err) {
+      showStatus('Could not read file: ' + err.message, 'error');
+    }
+  };
+  reader.onerror = function () { showStatus('Could not read file.', 'error'); };
+  reader.readAsArrayBuffer(file);
+});
+
+const REPORT_CSS = `
+  :root {
+    --bg-page: #f5f5f7;
+    --bg-header: #2D2A6E;
+    --bg-panel: #ffffff;
+    --accent: #E5007D;
+    --accent-hover: #C0006A;
+    --row-red: rgba(231,76,60,0.12);
+    --row-amber: rgba(243,156,18,0.15);
+    --row-green: rgba(39,174,96,0.15);
+    --text-primary: #2D2A6E;
+    --text-secondary: #6b6b8a;
+    --text-on-dark: #ffffff;
+    --border: #e0e0ec;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: var(--bg-page); color: var(--text-primary); }
+  header { background: var(--bg-header); color: var(--text-on-dark); padding: 0 20px; height: 56px; display: flex; align-items: center; gap: 20px; }
+  header h1 { font-size: 18px; margin: 0; }
+  .tagline { font-size: 10px; opacity: 0.55; letter-spacing: 0.05em; margin-top: 2px; }
+  main { max-width: 1100px; margin: 24px auto; padding: 0 20px 60px; }
+  .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .tile { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+  .tile .value { font-size: 30px; font-weight: 700; color: var(--text-primary); }
+  .tile.highlight .value { color: var(--accent); }
+  .tile .label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--text-primary); }
+  .meta-line { font-size: 12px; color: var(--text-secondary); margin-bottom: 16px; }
+  .ftpr-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ftpr-table th { background: var(--bg-header); color: var(--text-on-dark); padding: 8px 10px; text-align: left; font-size: 12px; }
+  .ftpr-table td { padding: 7px 10px; border-bottom: 1px solid #eaecef; }
+  .ftpr-table td.num, .ftpr-table th.num { text-align: right; }
+  .ftpr-table tbody tr:hover td { filter: brightness(0.96); }
+  .ftpr-table tbody tr.row-red td { background: var(--row-red); }
+  .ftpr-table tbody tr.row-amber td { background: var(--row-amber); }
+  .ftpr-table tbody tr.row-green td { background: var(--row-green); }
+`;
+
+function buildReportHtml(data) {
+  const jsonStr = JSON.stringify(data).replace(/</g, '\\u003c');
+
+  const rowsHtml = data.depotRows.map(function (d) {
+    return '<tr class="' + rateClass(d.rate) + '">' +
+      '<td>' + escapeHtml(d.store) + '</td>' +
+      '<td class="num">' + d.total + '</td>' +
+      '<td class="num">' + d.notFirst + '</td>' +
+      '<td class="num">' + d.rate.toFixed(1) + '%</td>' +
+      '</tr>';
+  }).join('');
+
+  const metaBits = [];
+  if (data.years.length) metaBits.push('Fiscal Year: ' + data.years.join(', '));
+  if (data.periods.length) metaBits.push('Period: ' + data.periods.join(', '));
+  metaBits.push('Source file: ' + escapeHtml(data.sourceFile));
+  metaBits.push('Generated: ' + new Date(data.generatedAt).toLocaleString());
+  const metaLine = metaBits.join(' &middot; ');
+
+  const html = [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head>',
+    '<meta charset="UTF-8">',
+    '<title>First Time Pick Rate Report</title>',
+    '<style>' + REPORT_CSS + '</style>',
+    '</head>',
+    '<body>',
+    '<header><div><h1>First Time Pick Rate Report</h1>' +
+      '<div class="tagline">Designed by First Bus Franchise &middot; Engineering</div></div></header>',
+    '<main>',
+    '<div class="tiles">',
+    '<div class="tile"><div class="value">' + data.total.toLocaleString() + '</div><div class="label">Total Issued</div></div>',
+    '<div class="tile"><div class="value">' + data.notFirst.toLocaleString() + '</div><div class="label">Not Picked First Time</div></div>',
+    '<div class="tile highlight"><div class="value">' + data.overallRate.toFixed(1) + '%</div><div class="label">First Time Pick Rate</div></div>',
+    '</div>',
+    '<div class="panel">',
+    '<h2>By Depot (Store)</h2>',
+    '<div class="meta-line">' + metaLine + '</div>',
+    '<table class="ftpr-table"><thead><tr><th>Store</th><th class="num">Total Issued</th><th class="num">Not First Time</th><th class="num">FTPR %</th></tr></thead>',
+    '<tbody>' + rowsHtml + '</tbody></table>',
+    '</div>',
+    '</main>',
+    '<' + 'script>window.REPORT_DATA = ' + jsonStr + ';</' + 'script>',
+    '</body>',
+    '</html>'
+  ].join('\n');
+
+  return html;
+}
+
+downloadBtn.addEventListener('click', function () {
+  if (!currentResult) return;
+  const data = Object.assign({}, currentResult, {
+    sourceFile: currentFileName,
+    generatedAt: new Date().toISOString()
+  });
+  const html = buildReportHtml(data);
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const periodLabel = (data.periods[0] || data.years[0] || 'period').toString().replace(/[^a-z0-9]+/gi, '-');
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = 'ftpr-report-' + periodLabel + '-' + dateStamp + '.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>
