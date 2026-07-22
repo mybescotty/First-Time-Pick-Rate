@@ -151,7 +151,7 @@
     </div>
     <div class="help-text">
       Upload the raw transaction export for one period. Rows with a <b>WorkOrder</b>
-      and a <b>Part</b> not starting <b>90</b> are counted by <b>TransactionQty</b>
+      and a <b>Part</b> not starting <b>90</b> or <b>99</b> are counted by <b>TransactionQty</b>
       (items, not transaction lines) into one of two buckets: <b>picked first time</b>
       when <b>TransactionType = I</b>, <b>PO</b> is blank, and <b>FleetNumber</b> is a
       numeric ID of 5+ digits; <b>not picked first time</b> when <b>PO</b> is populated
@@ -340,7 +340,8 @@ function processRows(rows, headerMap) {
     const qty = isNaN(qtyRaw) ? 0 : qtyRaw;
 
     if (!workOrder) continue;
-    if (part.toUpperCase().startsWith('90')) continue;
+    const partPrefix = part.toUpperCase();
+    if (partPrefix.startsWith('90') || partPrefix.startsWith('99')) continue;
 
     // Not picked first time: ordered in specifically via a VOR/ZIN purchase order.
     const isNotFirst = po !== '' && (poDocType === 'ZVOR' || poDocType === 'ZIN');
